@@ -10,3 +10,5 @@ This project uses an Arduino Leonardo (or compatible boards, like the CMCU Beetl
 The smallest boards can be integrated directly into the trackball, so that the TrackmanFX appears as a "native" USB device.
 
 One example of such a modification is [here](doc/README.md).
+
+The default mode of operation emulates the scroll wheel inside the microcontroller and needs no additional software setup. If you want the full experience of two-dimensional scrolling with the trackball when pressing the red button, you can pull pin 6 to ground and then configure button 8 for scrolling with xinput on X11, for example, just like with the native PS/2 connection.

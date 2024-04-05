@@ -35,6 +35,8 @@
  *
  *  default HW setup
  *   wire PS/2 connector to arduino PIN 2 (data) and 3 (clk)
+ *   wire switch to gnd on PIN 6 to enable red button reported as button 8
+ *     (disabled internal scrolling, enable 2D software wheel emulation)
  *   see: http://playground.arduino.cc/ComponentLib/Ps2mouse
  *   for the T-BC21, wire USB D- (next to VBUS) is data and USB D+ (next to GND) is clk
  *
@@ -68,6 +70,7 @@
 /* configuration input switches */
 #define LEFTHAND_PIN 8
 #define JIGGLE_PIN   7
+#define SCROLL_PIN   6
 
 /* int2board(CLK_PIN) == BOARD::D3 */
 #define B_CONCAT(x) BOARD::D##x
@@ -77,6 +80,7 @@ GPIO<int2board(DATA_PIN)>     pin_DATA;
 GPIO<int2board(CLK_PIN)>      pin_CLK;
 GPIO<int2board(LEFTHAND_PIN)> pin_LEFTHAND;
 GPIO<int2board(JIGGLE_PIN)>   pin_JIGGLE;
+GPIO<int2board(SCROLL_PIN)>   pin_SCROLL;
 GPIO<int2board(LED_BUILTIN)>  pin_LED;
 
 #ifdef LED_DEBUG
@@ -154,12 +158,17 @@ MyTimer heartbeat;
 bool lefthanded = false;
 /* global variables */
 uint8_t xtrabutton = 0;
-bool buttons[3] = { false, false, false };
+bool buttons[4] = { false, false, false, false };
 // lucky us, the definitions of MOUSE_LEFT,_RIGHT,_MIDDLE are also 1,2,4...
-uint8_t bmask[3] = { 0x01, 0x02, 0x04 };
+// Red button is mappend to the 8th one, matching PS/2.
+// Values are not straightforward ... button 8 is not 8th bit,
+// but fourth bit (value 8).
+uint8_t bimask[4] = { 0x01, 0x02, 0x04, 0x10 };
+uint8_t bomask[4] = { 0x01, 0x02, 0x04, 0x08 };
 int8_t scroll_sum = 0;
 
 bool stream_mode = true;
+bool internal_scrolling = true; // handle scroll button internally
 
 const uint8_t clk_interrupt = digitalPinToInterrupt(3);
 uint8_t ps2_error = 0;
@@ -464,8 +473,10 @@ void setup()
   Mouse.begin(); /* does not actually "begin" anything but defines USB descriptors */
   pin_low(pin_DATA);
   pin_low(pin_CLK);
+  pin_SCROLL.input().pullup();
   pin_JIGGLE.input().pullup();
   pin_LEFTHAND.input().pullup();
+  internal_scrolling = pin_SCROLL;
   jiggletimer.enabled = pin_JIGGLE; /* default on if pin open */
   lefthanded = !pin_LEFTHAND; /* default off */
 #ifdef SERIALDEBUG
@@ -531,7 +542,10 @@ void loop()
     Serial.read(); /* avoid host side blocking if something is typed in terminal */
 #endif
   /* update the switch state.
-     Does this even make sense at run time? but it does not hurt anyway ;-) */
+     Does this even make sense at run time? but it does not hurt anyway ;-)
+     Yes: User expects switches to match current behaviour without a
+     'reboot' of the mouse device. */
+  internal_scrolling = pin_SCROLL;
   jiggletimer.enabled = pin_JIGGLE; /* default on if pin open */
   lefthanded = !pin_LEFTHAND; /* default off */
   pin_LED.toggle();
@@ -578,8 +592,8 @@ void loop()
     }
 
     uint8_t btn = map_buttons(mstat, xtrabutton);
-    bool redbutton = btn & 0x10;
-    if (redbutton) { /* translate y scroll into wheel-scroll */
+    bool redbutton = btn & bimask[3];
+    if (internal_scrolling && redbutton) { /* translate y scroll into wheel-scroll */
       int8_t scroll = my / 8;
       if (! scroll) {
         scroll_sum += my;
@@ -605,11 +619,13 @@ void loop()
 
     /* handle normal buttons */
     for (uint8_t i = 0; i < sizeof(buttons); i++) {
-      bool button = btn & bmask[i];
+      if(internal_scrolling && i==3)
+        continue;
+      bool button = btn & bimask[i];
       if (!buttons[i] && button)
-        Mouse.press(bmask[i]);
+        Mouse.press(bomask[i]);
       else if (buttons[i] && !button)
-        Mouse.release(bmask[i]);
+        Mouse.release(bomask[i]);
       buttons[i] = button;
     }
 
